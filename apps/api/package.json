@@ -7,7 +7,7 @@
   "dependencies": {
     "@acsf/shared": "1.0.0",
     "@acsf/protocol": "1.0.0",
-    "@fastify/cors": "^9.0.1",
+    "@fastify/cors": "^11.3.0",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "better-sqlite3": "^11.3.0",
     "dotenv": "^16.4.5",
