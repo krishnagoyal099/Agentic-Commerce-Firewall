@@ -1,0 +1,33 @@
+{
+  "name": "agentic-commerce-firewall",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bounded autonomy for autonomous commerce. AI proposes. Policy decides.",
+  "workspaces": ["apps/*", "packages/*"],
+  "engines": { "node": ">=20.11.0" },
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,magenta \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "tsx watch apps/api/src/index.ts",
+    "dev:web": "npm run dev -w apps/web",
+    "mcp": "tsx apps/api/src/protocol/mcp/main.ts",
+    "build": "npm run typecheck && npm run build -w apps/web",
+    "typecheck": "tsc -p packages/shared/tsconfig.json && tsc -p packages/protocol/tsconfig.json && tsc -p apps/api/tsconfig.json && tsc -p apps/web/tsconfig.json && tsc -p tsconfig.tests.json",
+    "start": "tsx apps/api/src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate": "tsx apps/api/src/db/cli.ts migrate",
+    "db:seed": "tsx apps/api/src/db/cli.ts seed",
+    "fuzz": "tsx apps/api/src/scripts/fuzz.ts",
+    "smoke": "tsx apps/api/src/scripts/smoke.ts",
+    "smoke:payments": "tsx apps/api/src/scripts/smoke-payments.ts",
+    "dump": "node scripts/generate_dump.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "concurrently": "^9.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

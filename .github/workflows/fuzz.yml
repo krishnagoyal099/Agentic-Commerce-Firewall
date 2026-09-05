@@ -1,0 +1,74 @@
+name: Fuzz
+on:
+  schedule:
+    - cron: '0 3 * * *'          # nightly, UTC
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: 'Number of fuzz cases'
+        default: '5000'
+      seed:
+        description: 'Seed (deterministic)'
+        default: '1337'
+      maxSequenceLength:
+        description: 'Max multi-step sequence length'
+        default: '6'
+permissions:
+  contents: read
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  fuzz:
+    name: Deterministic fuzz gate (bypasses must be 0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CASES: ${{ github.event.inputs.cases || '5000' }}
+      SEED: ${{ github.event.inputs.seed || '1337' }}
+      MAXSEQ: ${{ github.event.inputs.maxSequenceLength || '6' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - name: Seed determinism — identical seed must produce identical statistics
+        run: |
+          set -euo pipefail
+          # NOTE: Duration (wall-clock ms) is intentionally filtered — it is
+          # the only non-deterministic line the CLI prints. Stats must match
+          # byte-for-byte, which is the §68 requirement.
+          npm run fuzz 400 99 4 | grep -v '^Duration' > /tmp/run-a.txt
+          npm run fuzz 400 99 4 | grep -v '^Duration' > /tmp/run-b.txt
+          diff /tmp/run-a.txt /tmp/run-b.txt
+          echo "OK: identical statistics for identical seed (seed 99)."
+      - name: Main fuzz run — nonzero bypasses fails the job
+        run: |
+          set -euo pipefail
+          npm run fuzz "$CASES" "$SEED" "$MAXSEQ" > /tmp/fuzz-main.txt
+          cat /tmp/fuzz-main.txt
+      - name: Additional seeds (broader coverage)
+        run: |
+          set -euo pipefail
+          npm run fuzz 2000 7  6 > /tmp/fuzz-7.txt
+          npm run fuzz 2000 42 5 > /tmp/fuzz-42.txt
+          cat /tmp/fuzz-7.txt /tmp/fuzz-42.txt
+      - name: Job summary (the FIREWALL SECURITY TEST report)
+        if: always()
+        run: |
+          {
+            echo "## FIREWALL SECURITY TEST"
+            echo '```'
+            cat /tmp/fuzz-main.txt 2>/dev/null || echo "(main run did not complete)"
+            echo '```'
+            echo "### Seed 7 (2,000 cases)"
+            echo '```'
+            cat /tmp/fuzz-7.txt 2>/dev/null || true
+            echo '```'
+            echo "### Seed 42 (2,000 cases)"
+            echo '```'
+            cat /tmp/fuzz-42.txt 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

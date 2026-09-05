@@ -1,0 +1,82 @@
+name: Security
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 4 * * *'   # nightly dependency-advisory sweep
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  # ------------------------------------------------------------- secret scan
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # full history — leaks in old commits are still leaks
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # ---------------------------------------------------- repository hygiene
+  integrity:
+    name: Repo integrity (.env hygiene, clean template)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: .env must never be tracked
+        run: |
+          set -euo pipefail
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo "::error::.env is committed. Remove it (git rm --cached .env), rotate any keys, and commit."
+            exit 1
+          fi
+          echo "OK: .env is not tracked."
+      - name: .env.example must contain no secret values (empty slots only)
+        run: |
+          set -euo pipefail
+          if grep -E '^[A-Z_]*(KEY|SECRET)[A-Z_]*=.+' .env.example; then
+            echo "::error::.env.example contains a filled-in key slot — it must stay the empty committed template."
+            exit 1
+          fi
+          echo "OK: .env.example is a clean template."
+  # -------------------------------------------------------- dependency audit
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - name: Production dependencies — fail on high/critical
+        run: npm audit --omit=dev --audit-level=high
+      - name: Full dependency audit — surface advisories as warnings
+        run: npm audit --audit-level=critical || echo "::warning::Advisories found (dev deps); review locally with 'npm audit'"
+  # ---------------------------------------------------- no-placeholder gate
+  markers:
+    name: Code integrity (no TODO/FIXME/placeholder markers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Source ships zero placeholders (spec §72)
+        run: |
+          set -euo pipefail
+          if grep -rInE "TODO|FIXME|XXX|HACK|implement later|coming soon" \
+              apps packages --include="*.ts" --include="*.tsx"; then
+            echo "::error::Forbidden markers found — this codebase ships no placeholder implementations."
+            exit 1
+          fi
+          echo "OK: no TODO/FIXME/placeholder markers in apps/ or packages/."

@@ -1,0 +1,197 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  # ---------------------------------------------------------------- typecheck
+  quality:
+    name: Typecheck (strict)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - name: Verify lockfile exists (npm ci requires it)
+        run: |
+          set -euo pipefail
+          test -f package-lock.json || {
+            echo "::error::package-lock.json is missing. Run 'npm install' locally and commit the lockfile."
+            exit 1
+          }
+      - run: npm ci
+      - name: Typecheck all five projects (shared, protocol, api, web, tests)
+        run: npm run typecheck
+  # -------------------------------------------------------------------- tests
+  test:
+    name: Tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20.x, 22.x]   # 20 = the engines contract; 22 = forward-compat check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Run Vitest (default output + GitHub annotations)
+        run: npm test -- --reporter=default --reporter=github
+  # -------------------------------------------------------------------- build
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - name: Typecheck + Vite production build
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+          retention-days: 7
+          if-no-files-found: error
+  # ------------------------------------------------- end-to-end acceptance gate
+  integration:
+    name: End-to-end acceptance (zero config, zero keys)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+      - run: npm ci
+      - name: Zero-configuration assertion (no .env, no secrets anywhere)
+        run: |
+          set -euo pipefail
+          test ! -f .env
+          echo "OK: running on defaults only — mock provider, local SQLite, deterministic agents."
+      - name: Engine smoke (in-memory DB)
+        run: npm run smoke
+      - name: Payment-safety smoke (UNKNOWN → reconcile → duplicate prevention)
+        run: npm run smoke:payments
+      - name: Boot the API
+        run: |
+          set -euo pipefail
+          npm start > /tmp/api.log 2>&1 &
+          echo $! > /tmp/api.pid
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:3001/api/health > /tmp/health.json; then break; fi
+            sleep 1
+          done
+          cat /tmp/health.json || true
+          test -s /tmp/health.json
+      - name: Health contract (mock provider, valid audit chain)
+        run: |
+          set -euo pipefail
+          grep -q '"status":"ok"'          /tmp/health.json
+          grep -q '"paymentProvider":"mock"' /tmp/health.json
+          grep -q '"auditChainValid":true'  /tmp/health.json
+      - name: Catalog discovery
+        run: |
+          set -euo pipefail
+          curl -sf 'http://localhost:3001/api/products?query=running' | grep -q '"id":"shoe-001"'
+      - name: START DEMO → ORDER_COMPLETED with real 38% co-purchase analytics
+        run: |
+          set -euo pipefail
+          curl -sf -X POST http://localhost:3001/api/demo/start > /tmp/demo.json
+          grep -q '"finalState":"ORDER_COMPLETED"' /tmp/demo.json
+          grep -q '"coPurchaseRate":0.38' /tmp/demo.json
+      - name: Protocol demo (MCP path) → ORDER_COMPLETED
+        run: |
+          set -euo pipefail
+          curl -sf -X POST http://localhost:3001/api/protocol/demo > /tmp/proto.json
+          grep -q '"finalState":"ORDER_COMPLETED"' /tmp/proto.json
+      - name: Attack gate — unauthorized discount → BLOCK
+        run: |
+          set -euo pipefail
+          curl -sf -X POST http://localhost:3001/api/attacks/unauthorized_discount > /tmp/attack.json
+          grep -q '"decision":"BLOCK"' /tmp/attack.json
+          grep -q 'MERCHANT_MAX_DISCOUNT_EXCEEDED' /tmp/attack.json
+      - name: Counterfactual boundary — ₹499/₹500 ALLOW, ₹501/₹2,000 BLOCK
+        run: |
+          set -euo pipefail
+          curl -sf -X POST http://localhost:3001/api/counterfactual \
+            -H 'content-type: application/json' \
+            -d '{"parameter":"discountPaise","values":[49900,50000,50100,200000]}' > /tmp/cf.json
+          test "$(grep -o '"decision":"ALLOW"' /tmp/cf.json | wc -l)" -eq 2
+          test "$(grep -o '"decision":"BLOCK"' /tmp/cf.json | wc -l)" -eq 2
+      - name: Fuzz gate — 300 real cases, bypasses must be 0
+        run: |
+          set -euo pipefail
+          curl -sf -X POST http://localhost:3001/api/fuzzer/run \
+            -H 'content-type: application/json' \
+            -d '{"cases":300,"seed":1337,"maxSequenceLength":4}' > /tmp/fuzz.json
+          node -e "
+            const r = require('/tmp/fuzz.json');
+            const s = r.run.stats;
+            if (s.bypasses !== 0) {
+              console.error('POLICY BYPASS DETECTED:', JSON.stringify(r.bypasses));
+              process.exit(1);
+            }
+            if (s.failures !== 0) {
+              console.error('Fuzz failures:', s.failures);
+              process.exit(1);
+            }
+            if (s.totalCases !== 300) {
+              console.error('Wrong case count:', s.totalCases);
+              process.exit(1);
+            }
+            console.log('fuzz ok:', JSON.stringify(s));
+          "
+      - name: Audit chain + metrics integrity
+        run: |
+          set -euo pipefail
+          curl -sf http://localhost:3001/api/audit/verify | grep -q '"valid":true'
+          curl -sf http://localhost:3001/api/metrics     | grep -q '"policyBypasses":0'
+      - name: Malformed input never crashes the server (fail-closed, 400)
+        run: |
+          set -euo pipefail
+          code=$(curl -s -o /tmp/malformed.json -w '%{http_code}' \
+            -X POST http://localhost:3001/api/carts \
+            -H 'content-type: application/json' -d '{"agentId":42}')
+          test "$code" -eq 400
+          grep -q '"code":"INVALID_REQUEST"' /tmp/malformed.json
+          curl -sf http://localhost:3001/api/health > /dev/null
+      - name: Stop the API
+        if: always()
+        run: |
+          if [ -f /tmp/api.pid ]; then kill "$(cat /tmp/api.pid)" 2>/dev/null || true; fi
+          pkill -f "apps/api/src/index.ts" 2>/dev/null || true
+          sleep 2
+      - name: MCP server boots on stdio (safe tools, privileged tools refused)
+        run: |
+          set -euo pipefail
+          npx tsx apps/api/src/protocol/mcp/main.ts > /tmp/mcp.out 2> /tmp/mcp.err &
+          for i in $(seq 1 30); do
+            grep -q "Agentic Commerce Firewall MCP server on stdio" /tmp/mcp.err && break
+            sleep 1
+          done
+          cat /tmp/mcp.err || true
+          grep -q "Agentic Commerce Firewall MCP server on stdio" /tmp/mcp.err
+          grep -q "Privileged tools" /tmp/mcp.err
+          pkill -f "protocol/mcp/main.ts" 2>/dev/null || true
+      - name: Dump API log on failure
+        if: failure()
+        run: cat /tmp/api.log || true

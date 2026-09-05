@@ -1,0 +1,27 @@
+// ./tsconfig.json  (base config — strict; extended by every workspace)
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@acsf/shared": ["packages/shared/src/index.ts"],
+      "@acsf/protocol": ["packages/protocol/src/index.ts"],
+      "@acsf/api": ["apps/api/src/index.ts"],
+      "@acsf/api/*": ["apps/api/src/*"]
+    }
+  }
+}
