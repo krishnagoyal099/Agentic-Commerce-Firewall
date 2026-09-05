@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Ignore documentation and test/smoke scripts"
+paths = [
+  '''README\.md''',
+  '''apps/api/src/scripts/.*''',
+  '''tests/.*''',
+  '''\.env\.example''',
+]

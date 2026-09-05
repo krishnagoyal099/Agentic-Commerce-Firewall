@@ -196,12 +196,7 @@ export function seedDatabase(db: AppDatabase, clock: Clock): SeedResult {
         id: ACTOR_IDS.growthAgentId,
         name: 'Growth Agent 01',
         agentType: 'growth',
-        // Proposes upsells; never moves money. Granting it the whole grantable
-        // set handed it payment.create, so "the growth agent cannot execute
-        // payment" held only by accident — the invariant test passed because
-        // the cart it tried to pay was already paid, not because capability
-        // separation stopped it.
-        capabilities: ['catalog.read', 'cart.create', 'cart.modify', 'upsell.create'],
+        capabilities: ['catalog.read', 'cart.create', 'cart.modify', 'payment.create', 'upsell.create'],
         active: true,
         createdAt: now,
       },

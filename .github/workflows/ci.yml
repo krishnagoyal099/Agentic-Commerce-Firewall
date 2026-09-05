@@ -49,7 +49,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Run Vitest (default output + GitHub annotations)
-        run: npm test -- --reporter=default --reporter=github
+        run: npm test -- --reporter=default --reporter=github-actions
   # -------------------------------------------------------------------- build
   build:
     name: Production build

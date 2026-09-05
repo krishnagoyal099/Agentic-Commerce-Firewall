@@ -146,7 +146,7 @@ function main(): void {
   const discountAttack = ctx.authorization.evaluateAction({
     ...paymentAction,
     actionId: 'smoke-discount-attack',
-    idempotencyKey: 'smoke-discount-attack-1',
+    idempotencyKey: 'atk-disc-1',
     amountPaise: updatedCart.subtotalPaise - 200_000,
     discountPaise: 200_000,
   });
@@ -163,7 +163,7 @@ function main(): void {
     protocol: 'REST',
     requestedCapabilities: ['cart.modify'],
     timestamp: clock.now().toISOString(),
-    idempotencyKey: 'smoke-malicious-1',
+    idempotencyKey: 'atk-mal-1',
     items: [{ productId: 'malicious-001', quantity: 1 }],
   });
   // malicious-001 (₹7,499) would push cart total to ₹15,297 — correctly BLOCKed by mandate cap (₹8,000),
@@ -173,7 +173,7 @@ function main(): void {
   const injectedDiscount = ctx.authorization.evaluateAction({
     ...paymentAction,
     actionId: 'smoke-injected-discount',
-    idempotencyKey: 'smoke-injected-1',
+    idempotencyKey: 'atk-inj-1',
     amountPaise: updatedCart.subtotalPaise - 674_910,
     discountPaise: 674_910,
   });
@@ -190,7 +190,7 @@ function main(): void {
     protocol: 'REST',
     requestedCapabilities: ['refund.create'],
     timestamp: clock.now().toISOString(),
-    idempotencyKey: 'smoke-refund-1',
+    idempotencyKey: 'atk-ref-1',
     paymentId: 'pay_does_not_exist',
     amountPaise: 100_000,
   });

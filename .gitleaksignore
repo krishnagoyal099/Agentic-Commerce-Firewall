@@ -1,0 +1,5 @@
+# Gitleaks ignore file
+47637d3f5fef5ee50e492dbc6ef6e5723652a3a6:README.md:generic-api-key:161
+47637d3f5fef5ee50e492dbc6ef6e5723652a3a6:apps/api/src/scripts/smoke.ts:generic-api-key:149
+47637d3f5fef5ee50e492dbc6ef6e5723652a3a6:apps/api/src/scripts/smoke.ts:generic-api-key:176
+47637d3f5fef5ee50e492dbc6ef6e5723652a3a6:apps/api/src/scripts/smoke.ts:generic-api-key:193

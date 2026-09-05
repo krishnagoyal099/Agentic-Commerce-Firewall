@@ -1,6 +1,6 @@
 // apps/web/src/pages/FirewallPage.tsx  (FULL FINAL)
 import { useEffect, useState } from 'react';
-import type { Decision } from '@acsf/shared';
+import type { Decision, DecisionSummaryDTO } from '@acsf/shared';
 import { errMessage } from '../api/client';
 import { AuthorityMap } from '../components/firewall/AuthorityMap';
 import { CounterfactualPanel } from '../components/firewall/CounterfactualPanel';
@@ -29,7 +29,7 @@ export function FirewallPage() {
     // Also re-selects when the current id has vanished (e.g. a demo reset from
     // another tab wiped every decision), which previously stuck the pane on a
     // permanent DECISION_NOT_FOUND.
-    if (rows.length > 0 && (selectedId === null || !rows.some((row) => row.id === selectedId))) {
+    if (rows.length > 0 && (selectedId === null || !rows.some((row: DecisionSummaryDTO) => row.id === selectedId))) {
       setSelectedId(rows[0]?.id ?? null);
     }
   }, [decisions.data, selectedId]);

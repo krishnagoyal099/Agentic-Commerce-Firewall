@@ -78,19 +78,10 @@ function chainHashPayload(row: {
  * and sequence-strict (better-sqlite3 is synchronous — no interleaving).
  */
 export class AuditService {
-  /** Invalidated by every append and keyed on the head anchor. */
-  private cachedStatus: { key: string; status: AuditChainStatus } | null = null;
-
   constructor(
     private readonly db: AppDatabase,
     private readonly clock: Clock,
   ) {}
-
-  /** Re-seeds the anchor after a wipe; see resetTransactionalState. */
-  resetChainAnchor(): void {
-    this.db.delete(schema.auditChainHead).run();
-    this.cachedStatus = null;
-  }
 
   append(input: AppendAuditInput): AuditEventDTO {
     const timestamp = this.clock.now().toISOString();
@@ -150,7 +141,6 @@ export class AuditService {
         .run();
       return { eventId, sequence };
     });
-    this.cachedStatus = null;
     const row = this.db
       .select()
       .from(schema.auditEvents)
@@ -163,11 +153,17 @@ export class AuditService {
   }
 
   /**
-   * Re-hashes the whole chain, so it is memoised against the current head.
-   * The dashboard polls /api/metrics every 5s and /api/audit/verify every 8s,
-   * and better-sqlite3 is synchronous — recomputing SHA-256 over a
-   * monotonically growing table on every poll blocked the event loop for
-   * longer and longer as a demo went on.
+   * Recomputes the whole chain on every call, deliberately.
+   *
+   * An earlier version of this memoised the result against the head anchor.
+   * That was wrong: the threat this function exists to detect is an in-place
+   * edit of a stored row, which changes NOTHING about the head — so a cached
+   * "valid" would keep being served until the next append happened to
+   * invalidate it. A tamper-detector that trusts a cache is not a
+   * tamper-detector. The cost (SHA-256 over a growing table, synchronously, on
+   * every dashboard poll) is real and is noted as a known issue; the answer is
+   * to poll less often or verify incrementally from a signed checkpoint, not
+   * to cache the verdict.
    */
   verifyChain(): AuditChainStatus {
     const anchor = this.db
@@ -175,13 +171,7 @@ export class AuditService {
       .from(schema.auditChainHead)
       .where(eq(schema.auditChainHead.id, 'head'))
       .get();
-    const cacheKey = `${anchor?.sequence ?? 0}:${anchor?.eventHash ?? 'none'}`;
-    if (this.cachedStatus !== null && this.cachedStatus.key === cacheKey) {
-      return this.cachedStatus.status;
-    }
-    const status = this.computeChainStatus(anchor ?? null);
-    this.cachedStatus = { key: cacheKey, status };
-    return status;
+    return this.computeChainStatus(anchor ?? null);
   }
 
   private computeChainStatus(
@@ -234,9 +224,9 @@ export class AuditService {
     // Links and hashes can all be intact and the chain still be a lie: dropping
     // the last K events leaves 1..N-K perfectly self-consistent. The anchor is
     // the only thing that knows where the chain was supposed to end.
-    const last = rows.length > 0 ? rows[rows.length - 1] : null;
+    const last = rows.length > 0 ? rows[rows.length - 1]! : null;
     if (anchor !== null) {
-      if (last === null) {
+      if (!last) {
         return {
           valid: false,
           eventCount: 0,
