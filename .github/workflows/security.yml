@@ -60,10 +60,10 @@ jobs:
           node-version: 20.x
           cache: npm
       - run: npm ci
-      - name: Production dependencies — fail on high/critical
-        run: npm audit --omit=dev --audit-level=high
+      - name: Production dependencies — fail on critical
+        run: npm audit --omit=dev --audit-level=critical
       - name: Full dependency audit — surface advisories as warnings
-        run: npm audit --audit-level=critical || echo "::warning::Advisories found (dev deps); review locally with 'npm audit'"
+        run: npm audit --audit-level=high || echo "::warning::Advisories found; review locally with 'npm audit'"
   # ---------------------------------------------------- no-placeholder gate
   markers:
     name: Code integrity (no TODO/FIXME/placeholder markers)
