@@ -5,6 +5,33 @@ import type { AppContext } from './appContext';
 import { registerRoutes } from './routes';
 import { DomainError } from './utils/errors';
 
+/**
+ * Determines allowed CORS origins.
+ * - test:        any origin (integration tests spin up their own Fastify)
+ * - production:  ALLOWED_ORIGIN env var + any *.vercel.app subdomain so the
+ *                Vercel preview/production deployment works without extra config
+ * - development: localhost only
+ */
+function getAllowedOrigins(ctx: AppContext): string[] | ((origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) => void) {
+  if (ctx.config.nodeEnv === 'test') return [];
+
+  if (ctx.config.nodeEnv === 'production') {
+    return (origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) => {
+      if (origin === undefined) { cb(null, true); return; }         // server-to-server / curl
+      const allowedOrigin = process.env['ALLOWED_ORIGIN']?.trim();
+      if (allowedOrigin && origin === allowedOrigin) { cb(null, true); return; }
+      if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin)) { cb(null, true); return; }
+      cb(null, false);
+    };
+  }
+
+  // development
+  return [
+    `http://localhost:${ctx.config.webPort}`,
+    `http://127.0.0.1:${ctx.config.webPort}`,
+  ];
+}
+
 function statusForCode(code: string): number {
   if (code.includes('NOT_FOUND')) return 404;
   if (code.startsWith('INVALID')) return 400;
@@ -36,16 +63,9 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
   const app = Fastify({
     logger: ctx.config.nodeEnv === 'test' ? false : { level: 'info' },
   });
-  // Was `origin: true`, which reflects ANY origin. With no authentication on
-  // the API, that let any page the user happened to visit call POST
-  // /api/demo/reset (wipes all state), PUT /api/policy or POST /api/mandates
-  // from their browser and read the responses. Dev origins only.
-  const devOrigins = [
-    `http://localhost:${ctx.config.webPort}`,
-    `http://127.0.0.1:${ctx.config.webPort}`,
-  ];
   await app.register(cors, {
-    origin: ctx.config.nodeEnv === 'test' ? true : devOrigins,
+    origin: ctx.config.nodeEnv === 'test' ? true : getAllowedOrigins(ctx),
+    credentials: true,
   });
 
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body: string, done) => {
